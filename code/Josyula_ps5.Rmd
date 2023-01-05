@@ -1,0 +1,191 @@
+---
+title: "Problem Set 5"
+author: "Ananth Josyula"
+institute: "Vanderbilt University"
+date: "Due Date: 2022/10/09 @ 11:59PM CST"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Getting Set Up
+
+If you haven't already, create a folder for this course, and then a subfolder within for the second lecture `Topic7_ConditionalVariation`, and two additional subfolders within `code` and `data`.
+
+Open `RStudio` and create a new RMarkDown file (`.Rmd`) by going to `File -> New File -> R Markdown...`.
+Change the title to `"DS1000: Problem Set 5"` and the author to your full name. Save this file as `[LAST NAME]_ps5.Rmd` to your `code` folder.
+
+If you haven't already, download the `Pres2020_PV.Rds` and `Pres2020_StatePolls.Rds` file from the course [github page](https://github.com/jbisbee1/DSCI1000/blob/main/Lectures/Topic7_ConditionalVariation/data/) and save it to your `data` folder. Then require `tidyverse` and load the `Pres2020_PV.Rds` data to `pres`.
+```{r}
+# INSERT CODE HERE
+require(tidyverse)
+pres <- readRDS("../data/Pres2020_PV.rds")
+```
+
+
+## Question 1 [3 points]
+What is the relationship between the margin of error (`MoE`) and the sample size (`SampleSize`)? Choose the appropriate plot and describe your answer in a few sentences. Make sure to label the figure thoroughly. EXTRA CREDIT: make a sensible decision about how to handle the skew in the data and defend your choice.
+```{r}
+# INSERT CODE HERE
+pres_raw <- pres
+pres_raw %>%
+  ggplot(aes(x=SampleSize, y=MoE)) + scale_x_log10() + geom_point() +
+  labs(title = 'Margin of Error vs log of Sample Size', x = 'log of Sample Size', y = 'Margin of Error')
+```
+
+> - Based on the logged graph above, as the sample size increases, the margin of error decreases. One way to handle the skew could be to remove the outlier with a very large sample size or could be to identify the 1st and 3rd quartile and only graph data between those values.
+
+## Question 2 [3 points]
+Calculate the weighted average of Biden and Trump's support via the `weighted.mean()` function. Try using both the sample size (`SampleSize`) as weights or the inverse of the margin of error (`1/MoE`). Compare these estimates to the unweighted estimate. Which is more accurate? NB: you will have to make a decision about how to handle polls that don't report their margin of error or sample size. Describe and justify your decision.
+
+```{r}
+# INSERT CODE HERE
+pres_raw %>%
+  filter(!is.na(SampleSize)) %>%
+  summarise(bidenSWeighted = weighted.mean(Biden,w = SampleSize),
+            trumpSWeighted = weighted.mean(Trump,w = SampleSize))
+
+pres_raw %>%
+  filter(!is.na(MoE)) %>%
+  summarise(bidenMoeWeighted = weighted.mean(Biden,w = 1/MoE),
+            trumpMoeWeighted = weighted.mean(Trump,w = 1/MoE))
+
+pres_raw %>%
+  summarise(bidenUnweight = mean(Biden, na.rm = T),
+            trumpUnweight = mean(Trump, na.rm = T))
+```
+
+> - Based on both weighted samples and the unweighted sample, the weighted by sample size is most accurate. This is because its values for both Biden and Trump based on weighting by sample size of 50.16537 and 43.06868 respectively are very close to the actual vote count of 51 for Biden and 47 for Trump. NA entries were removed when calculating the mean for both weighted and unweighted.
+
+## Question 3 [4 points]
+Did national polls fielded on or after September 1st over-estimate Biden's support and underestimate Trump's support? Answer the question using bootstrap simulations that randomly sample every poll with replacement (`sample_n(size = nrow(.), replace = T)`) to express your confidence in your conclusion. Save your bootstrapped results to an object named `bs_Nation_Vanilla`. Plot the simulated results with two histograms on the same plot, using red for Trump and blue for Biden, and overlay vertical lines showing their true vote shares (red dashed lines for Trump and blue dashed lines for Biden). Make sure to label your figure thoroughly.
+
+```{r}
+# INSERT CODE HERE
+pres_raw <- pres %>%
+  mutate(StartDate = as.Date(StartDate, format="%m/%d/%Y")) %>%
+  filter(StartDate >= as.Date("2020-09-01"))
+
+set.seed(123)
+bs_Nation_Vanilla <- NULL
+
+for(i in 1:1000) {
+  bs_Nation_Vanilla <- pres_raw %>%
+  sample_n(size = nrow(.), replace=T) %>%
+  summarise(meanBiden = mean(Biden, na.rm = T), meanTrump = mean(Trump, na.rm = T)) %>%
+  bind_rows(bs_Nation_Vanilla)
+}
+
+bs_Nation_Vanilla %>%
+  summarise(conBiden = mean(meanBiden > 51, na.rm=T), conTrump = mean(meanTrump < 47, na.rm=T))
+
+plot_final <- bs_Nation_Vanilla %>%
+  ggplot(aes(x=StartDate))+
+  geom_histogram(aes(x=meanBiden), fill = 'blue', bins=50, alpha=0.6) +
+  geom_histogram(aes(x=meanTrump), fill = 'red', bins=50, alpha=0.6) +
+  geom_vline(xintercept = 47, linetype = 'dashed', color='red') +
+  geom_vline(xintercept = 51, linetype = 'dashed', color='blue') +
+  labs(title = 'Predicted support for Trump and Biden',
+       subtitle = 'Polls on or after Sept. 1',
+       x='Share of Votes for Trump and Biden',
+       y='Sample Size')
+
+plot_final
+```
+
+> - Based on the simulation, the polls conducted on or after September 1 underestimated Trump's support with 100% confidence. Meanwhile, they overestimated Biden's support with 8.4% confidence.
+
+## Question 4 [4 points]
+Re-estimate the preceding question, but this time calculate the weighted average of support for Biden and Trump using the best weights as identified in Question 2 above. Save your bootstrapped results to an object named `bs_Nation_Wgt`. Does your *confidence* change from the previous question? Which set of results are more accurate?
+
+```{r}
+# INSERT CODE HERE
+pres_raw <- pres %>%
+  mutate(StartDate = as.Date(StartDate, format='%m/%d/%Y')) %>%
+  filter(StartDate >= as.Date("2020-09-01"))
+  
+set.seed(123)
+bs_Nation_Wgt  <- NULL 
+
+for(i in 1:1000) {
+  bs_Nation_Wgt <- pres_raw %>%
+  sample_n(size = nrow(.), replace = T) %>%
+  summarise(meanTrump = weighted.mean(Trump, w=SampleSize,na.rm=T), meanBiden = weighted.mean(Biden, w=SampleSize, na.rm=T)) %>%
+  bind_rows(bs_Nation_Wgt)
+}
+
+pres_final <- bs_Nation_Wgt %>%
+  summarise(conBiden = mean(meanBiden > 51, na.rm=T), conTrump = mean(meanTrump < 47, na.rm=T))
+
+pres_final
+```
+
+> - Based on the the weighted average of support for Biden and Trump using weights by sample size as identified in question 2, while the Trump confidence remains constant, the Biden confidence increases from 8.4% to 97.9%. Since 8.4 is closer to 51 and both Trump confidences are the same, bs_Nation_Vanilla seems more accurate.
+
+## Question 5 [3 points]
+Can we do better with aggregating state polls? Load the [`Pres2020_StatePolls.Rds`] to an object called `state`. Then, aggregating over all states, take the average popular vote share for Biden and Trump and compare this estimate to their true values. Do the raw state polls do better or worse than the national polls? (NB: your point of comparison should still be the `DemCertVote` and `RepCertVote` from the `pres` data, **not** the `BidenCertVote` and `TrumpCertVote` from the state data.) What if you weighted the state polls by `SampleSize` instead?
+
+```{r}
+# INSERT CODE HERE
+state <- readRDS(file="../data/Pres2020_StatePolls.Rds")
+
+state %>%
+  summarise(meanBiden = mean(Biden, na.rm=T), meanTrump = mean(Trump, na.rm=T))
+
+state %>%
+  filter(!is.na(SampleSize)) %>%
+  summarise(bidenSWeighted = weighted.mean(Biden,w = SampleSize), trumpSWeighted = weighted.mean(Trump,w = SampleSize))
+```
+
+> - Overall, the state polls are more accurate than the raw national polls. However, the weighted state poll is more accurate for Biden with a value of 50.89596% compared to his true 51% while the unweighted state poll is more accurate for Trump with a value of 45.19094% compared to his true 47%.
+
+## Question 6 [3 points]
+Redo the analyses for question 4 using the state polls fielded after September 1st and weighting by `SampleSize` (again, make a choice about how to deal with the missing weights). Save your bootstrap results to an object named `bs_State_Wgt`. How confident are you that state polls overestimate Biden's actual popular vote (`DemCertVote` from the `pres` data)? How confident are you that state polls underestimate Trump's actual popular vote (`RepCertVote` from the `pres` data)? Based on this analysis, which set of polls would you prefer to use: national (i.e., the `pres` data) or state (i.e., the `state` data)?
+
+```{r}
+# INSERT CODE HERE
+state_raw <- state %>%
+  mutate(date = as.Date(StartDate,format = '%m/%d/%Y')) %>%
+  filter(date >= as.Date("2020-09-01"))
+
+set.seed(123)
+bs_State_Wgt <- NULL
+
+for(i in 1:1000){
+  bs_State_Wgt <- state_raw %>%
+  filter(!is.na(SampleSize)) %>%
+  sample_n(size = nrow(.),replace=T) %>%
+  summarise(meanBiden = weighted.mean(Biden,w = SampleSize,na.rm=T),
+      meanTrump = weighted.mean(Trump,w = SampleSize,na.rm=T)) %>%
+  bind_rows(bs_State_Wgt)
+}
+
+bs_State_Wgt %>%
+  mutate(cBiden = ifelse(meanBiden > 51, 1, 0)) %>%
+  mutate(cTrump = ifelse(meanTrump < 47, 1, 0)) %>%
+  summarise(conBiden = mean(cBiden), conTrump = mean(cTrump))
+
+plot_final <- bs_State_Wgt %>%
+  ggplot(aes(x=StartDate)) +
+  geom_histogram(aes(x=meanBiden), fill = 'blue', bins=50, alpha=0.6) +
+  geom_histogram(aes(x=meanTrump), fill = 'red', bins=50, alpha=0.6) +
+  geom_vline(xintercept = 47, linetype = 'dashed', color='red') +
+  geom_vline(xintercept = 51, linetype = 'dashed', color='blue') +
+  labs(title = 'Predicted support for Trump and Biden by State',
+       subtitle = 'Polls on or after Sept. 1',
+       x='Share of Votes for Trump and Biden',
+       y='Sample Size')
+
+plot_final
+```
+
+> - Based on the results of the state simulation, the Trump confidence stayed constant at 1 compared to the national simulation in 4. Meanwhile, the Biden confidence of polls that overestimated Biden decreased from 97.9% in the national simulation in 4 to 88.1%. This means that 88.1% of the polls in the state simulation overestimated.  
+
+## Question 7 [3 extra credit points]
+EXTRA CREDIT: Run the bootstrapped analysis on the state poll data over time. Specifically, start with the full data and then restrict attention to 90 days prior to the election, 60 days prior to the election, 30 days prior to the election, and 14 days prior to the election. Plot the results with `geom_violin()` for Trump (in red) and Biden (in blue) for each subset of the data, overlaying dashed horizontal lines (again in red and blue) depicting the true support for each candidate. When do the state polls begin to converge on the true popular vote share? Provide a theory for why this might be the case.
+
+```{r}
+# INSERT CODE HERE
+```
+
+> - Write 2 to 3 sentences here.
